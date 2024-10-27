@@ -1,7 +1,6 @@
 import numpy as np
 import pandas as pd
 import datetime
-import seaborn as sns
 import matplotlib.pyplot as plt
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.model_selection import train_test_split, RandomizedSearchCV
@@ -12,28 +11,37 @@ import json
 import folium
 import altair as alt
 import shap
+import streamlit.components.v1 as components
 import joblib
+import requests
+import io
 import plotly.express as px
 from streamlit_folium import st_folium
 
 st.set_page_config(layout = 'wide')
-st.set_option('./deprecation.showPyplotGlobalUse', False)
+# st.set_option('./deprecation.showPyplotGlobalUse', False)
 
 @st.cache_data
 def load_data():
-    df = pd.read_csv('./Foodborne_Region_MasterTable_2.csv')
+    df = pd.read_csv('https://raw.githubusercontent.com/Jeon-doun/food_poissoning_dashboard/refs/heads/main/Foodborne_Region_MasterTable_2.csv')
     return df
 
 @st.cache_data
 def load_json():
-    state_geo = './TL_SCCO_CTPRVN.json'
-    json_data = open(state_geo, encoding = 'utf-8').read()
-    jsonResult = json.loads(json_data)
+    state_geo = 'https://raw.githubusercontent.com/Jeon-doun/food_poissoning_dashboard/refs/heads/main/TL_SCCO_CTPRVN.json'
+    response = requests.get(state_geo)
+    response.raise_for_status() # 요청에 실패하면 오류 발생
+    jsonResult = response.json()
+    # json_data = open(state_geo, encoding = 'utf-8').read()
+    # jsonResult = json.loads(json_data)
     return jsonResult
 
 @st.cache_resource
 def load_model(model_path):
-    loaded_model = joblib.load(model_path)
+    response = requests.get(model_path)
+    response.raise_for_status() # 요청에 실패하면 오류 발생
+    file = io.BytesIO(response.content) # pkl파일 불러오기
+    loaded_model = joblib.load(file)
     return loaded_model
 
 def convert_dash_info(x):
@@ -43,12 +51,16 @@ def convert_dash_info(x):
         return 'OCCRNC_CNT'
     elif x == '발생환자수':
         return 'PATNT_CNT'
+    
+def st_shap(plot, height=None):
+    shap_html = f"<head>{shap.getjs()}</head><body>{plot.html()}</body>"
+    components.html(shap_html, height=height)
 
 def shap_summary_plot(model, X):
-    shap_tree_exp = shap.TreeExplainer(model)
-    shap_value = pd.DataFrame(shap_tree_exp.shap_values(X), columns = X.columns)
-    shap_summary_plot = shap.summary_plot(np.array(shap_value), X, max_display = 5, alpha = 1, color_bar = False )
-    return shap_summary_plot
+    explainer = shap.Explainer(model, X)
+    shap_values = explainer(X)
+    plot = shap.force_plot(explainer.expected_value, shap_values.values[0, :], X.iloc[0, :])
+    return st_shap(plot, height=300)
 
 def main():
 
@@ -58,7 +70,7 @@ def main():
     data = data.sort_index()
 
     # 모델 로드 및 캐시 저장(추후에 지역별로 전부 불러와야함)
-    model = load_model('./test_clf_model.pkl')
+    model = load_model('https://github.com/Jeon-doun/food_poissoning_dashboard/raw/refs/heads/main/test_clf_model.pkl')
     model = model.best_estimator_
 
     # 행정구역 json 로드 및 캐시 저장
@@ -217,8 +229,6 @@ def main():
                     X = target_df_2[model.feature_names_in_]
 
                     shap_plot = shap_summary_plot(model, X)
-
-                    st.pyplot(shap_plot)
 
                     st.subheader('월별 식중독 발생 현황')
 
